@@ -1,0 +1,69 @@
+version: "3"
+
+tasks:
+  default:
+    desc: 利用可能な task を表示する
+    cmds:
+      - task --list
+
+  up:
+    desc: 全サービスを build して起動する
+    cmds:
+      - docker compose up --build -d
+
+  down:
+    desc: 全サービスを停止する
+    cmds:
+      - docker compose down
+
+  reset:
+    desc: seed data と S3 bucket を初期状態に戻す
+    cmds:
+      - >-
+        curl -fsS -X POST -H 'x-initialize-token: sakaguchi-local'
+        http://localhost:${APP_PORT:-8080}/api/initialize
+
+  logs:
+    desc: nginx、API、PostgreSQL、kumo のログを追跡する
+    cmds:
+      - docker compose logs -f web api db kumo
+
+  ps:
+    desc: コンテナの状態を表示する
+    cmds:
+      - docker compose ps
+
+  check:
+    desc: format、lint、型を検査する
+    cmds:
+      - pnpm run check
+
+  test:
+    desc: テストを実行する
+    cmds:
+      - pnpm test
+
+  bench:
+    desc: k6 の smoke 負荷試験を実行する
+    cmds:
+      - docker compose --profile bench run --rm k6
+
+  tools:
+    desc: pgweb を起動する
+    cmds:
+      - docker compose --profile tools up -d pgweb
+
+  stats:
+    desc: PostgreSQL の累積実行時間上位クエリを表示する
+    cmds:
+      - >-
+        docker compose exec -T db psql -U sakaguchi -d sakaguchi -c
+        "SELECT calls, round(total_exec_time::numeric, 1) AS total_ms,
+        round(mean_exec_time::numeric, 2) AS mean_ms, rows,
+        left(query, 100) AS query FROM pg_stat_statements
+        ORDER BY total_exec_time DESC LIMIT 10"
+
+  sizes:
+    desc: Compose で使用中の image サイズを表示する
+    cmds:
+      - docker compose images

@@ -1,0 +1,119 @@
+name: sakaguchi
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+
+services:
+  web:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: web
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  api:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: api
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://sakaguchi@db:5432/sakaguchi
+      DB_POOL_SIZE: 10
+      INITIALIZE_TOKEN: sakaguchi-local
+      SEED_PATH: /app/database/seed.sql
+      AWS_ENDPOINT: http://kumo:4566
+    depends_on:
+      db:
+        condition: service_healthy
+      kumo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  db:
+    <<: *service-defaults
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: sakaguchi
+      POSTGRES_USER: sakaguchi
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - log_min_duration_statement=100
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/001-schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/20-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sakaguchi -d sakaguchi"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  kumo:
+    <<: *service-defaults
+    image: ghcr.io/sivchari/kumo:0.25.3
+    environment:
+      KUMO_HOST: 0.0.0.0
+      KUMO_PORT: 4566
+      KUMO_LOG_LEVEL: info
+    ports:
+      - "127.0.0.1:${KUMO_PORT:-4566}:4566"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4566/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb:0.17.0
+    profiles: [tools]
+    environment:
+      PGWEB_DATABASE_URL: postgres://sakaguchi@db:5432/sakaguchi?sslmode=disable
+    ports:
+      - "127.0.0.1:${PGWEB_PORT:-8081}:8081"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  k6:
+    image: grafana/k6:1.6.1
+    profiles: [bench]
+    volumes:
+      - ./bench:/scripts:ro
+    command: ["run", "/scripts/smoke.js"]
+    environment:
+      TARGET_URL: http://web:8080
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
