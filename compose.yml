@@ -12,7 +12,9 @@ services:
       dockerfile: docker/app.Dockerfile
       target: web
     ports:
-      - "127.0.0.1:${APP_PORT:-8080}:8080"
+      - target: 8080
+        published: "${APP_PORT:-0}"
+        host_ip: 127.0.0.1
     ulimits:
       nofile:
         soft: 65535
@@ -66,7 +68,9 @@ services:
       - -c
       - log_min_duration_statement=100
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - target: 5432
+        published: "${POSTGRES_PORT:-0}"
+        host_ip: 127.0.0.1
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./database/001-schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
@@ -85,7 +89,9 @@ services:
       KUMO_PORT: 4566
       KUMO_LOG_LEVEL: info
     ports:
-      - "127.0.0.1:${KUMO_PORT:-4566}:4566"
+      - target: 4566
+        published: "${KUMO_PORT:-0}"
+        host_ip: 127.0.0.1
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:4566/health"]
       interval: 5s
@@ -98,7 +104,9 @@ services:
     environment:
       PGWEB_DATABASE_URL: postgres://sakaguchi@db:5432/sakaguchi?sslmode=disable
     ports:
-      - "127.0.0.1:${PGWEB_PORT:-8081}:8081"
+      - target: 8081
+        published: "${PGWEB_PORT:-0}"
+        host_ip: 127.0.0.1
     depends_on:
       db:
         condition: service_healthy

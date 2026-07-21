@@ -19,8 +19,16 @@ runtime image は Alpine と multi-stage build を使います。pgweb は通常
 ```sh
 cp .env.example .env
 task up
-curl http://localhost:8080/api/health
-open http://localhost:8080
+task ports
+```
+
+ホスト側ポートは起動時に空きポートを自動割り当てします。`task up`と`task ports`に表示されたwebのURLをブラウザで開いてください。PostgreSQLは接続文字列を表示します。コンテナ内ではweb `8080`、PostgreSQL `5432`、kumo `4566`のままです。
+
+固定したい場合は、`.env`の該当項目だけ設定します。
+
+```env
+APP_PORT=18080
+POSTGRES_PORT=15432
 ```
 
 初回は PostgreSQL に users 100件、posts 500件、comments 5,000件、likes 10,000件を投入します。
@@ -32,7 +40,8 @@ task bench   # autocannonで負荷試験
 task stats   # pg_stat_statements の重いクエリ上位を表示
 task reset   # seed data を初期状態に戻す
 task logs    # nginx / API / PostgreSQL / kumo の timing log
-task tools   # pgweb を http://localhost:8081 で起動
+task ports   # ホストに割り当てられたポートを表示
+task tools   # pgwebを起動し、割り当てられたポートを表示
 task sizes   # 関連 image のサイズ確認
 task down
 ```
@@ -41,7 +50,7 @@ connection数、実行時間、HTTP pipelining、対象URLを変更できます�
 
 ```sh
 task bench CONNECTIONS=100 DURATION=30 PIPELINING=10
-task bench BENCH_URL='http://127.0.0.1:8080/api/posts/1' CONNECTIONS=50
+task bench BENCH_URL='http://127.0.0.1:18080/api/posts/1' CONNECTIONS=50
 ```
 
 method、header、body、worker数など、autocannonの追加オプションも渡せます。

@@ -10,6 +10,7 @@ tasks:
     desc: 全サービスを build して起動する
     cmds:
       - docker compose up --build -d
+      - task: ports
 
   down:
     desc: 全サービスを停止する
@@ -19,9 +20,10 @@ tasks:
   reset:
     desc: seed data と S3 bucket を初期状態に戻す
     cmds:
-      - >-
-        curl -fsS -X POST -H 'x-initialize-token: sakaguchi-local'
-        http://localhost:${APP_PORT:-8080}/api/initialize
+      - |
+        web_port="$(docker compose port web 8080 | awk -F: '{print $NF}')"
+        curl -fsS -X POST -H 'x-initialize-token: sakaguchi-local' \
+          "http://127.0.0.1:${web_port}/api/initialize"
 
   logs:
     desc: nginx、API、PostgreSQL、kumo のログを追跡する
@@ -32,6 +34,23 @@ tasks:
     desc: コンテナの状態を表示する
     cmds:
       - docker compose ps
+
+  ports:
+    desc: ホストに自動割り当てされたポートを表示する
+    cmds:
+      - |
+        for mapping in web:8080 db:5432 kumo:4566 pgweb:8081; do
+          service="${mapping%%:*}"
+          container_port="${mapping##*:}"
+          host_address="$(docker compose port "${service}" "${container_port}" 2>/dev/null || true)"
+          if [ -n "${host_address}" ]; then
+            case "${service}" in
+              db) endpoint="postgres://sakaguchi@${host_address}/sakaguchi" ;;
+              *) endpoint="http://${host_address}" ;;
+            esac
+            printf '%-8s %s\n' "${service}" "${endpoint}"
+          fi
+        done
 
   check:
     desc: format、lint、型を検査する
@@ -49,21 +68,26 @@ tasks:
       CONNECTIONS: '{{default "10" .CONNECTIONS}}'
       DURATION: '{{default "10" .DURATION}}'
       PIPELINING: '{{default "1" .PIPELINING}}'
-      BENCH_URL: '{{default "http://127.0.0.1:8080/api/posts?limit=20" .BENCH_URL}}'
     cmds:
-      - >-
-        pnpm exec autocannon
-        --connections {{.CONNECTIONS}}
-        --duration {{.DURATION}}
-        --pipelining {{.PIPELINING}}
-        --renderStatusCodes
-        {{.CLI_ARGS}}
-        '{{.BENCH_URL}}'
+      - |
+        bench_url='{{.BENCH_URL}}'
+        if [ -z "${bench_url}" ]; then
+          web_port="$(docker compose port web 8080 | awk -F: '{print $NF}')"
+          bench_url="http://127.0.0.1:${web_port}/api/posts?limit=20"
+        fi
+        pnpm exec autocannon \
+          --connections {{.CONNECTIONS}} \
+          --duration {{.DURATION}} \
+          --pipelining {{.PIPELINING}} \
+          --renderStatusCodes \
+          {{.CLI_ARGS}} \
+          "${bench_url}"
 
   tools:
     desc: pgweb を起動する
     cmds:
       - docker compose --profile tools up -d pgweb
+      - task: ports
 
   stats:
     desc: PostgreSQL の累積実行時間上位クエリを表示する
