@@ -9,10 +9,10 @@
 - PostgreSQL 17: users / posts / comments / likes と seed data
 - kumo 0.25.3: 軽量な Go 製 AWS emulator。S3 bucket を API 起動時に作成
 - Vite+: Vite、Vitest、Oxlint、Oxfmt、TypeScript check
-- k6: 任意起動の負荷試験
+- autocannon: connection数やpipeliningを変更できるHTTP負荷試験
 - pgweb: 任意起動の DB UI
 
-runtime image は Alpine と multi-stage build を使います。k6 と pgweb は通常起動には含まれません。
+runtime image は Alpine と multi-stage build を使います。pgweb は通常起動には含まれません。
 
 ## 起動
 
@@ -28,7 +28,7 @@ open http://localhost:8080
 ## 練習用コマンド
 
 ```sh
-task bench   # k6 を一時コンテナで実行
+task bench   # autocannonで負荷試験
 task stats   # pg_stat_statements の重いクエリ上位を表示
 task reset   # seed data を初期状態に戻す
 task logs    # nginx / API / PostgreSQL / kumo の timing log
@@ -37,10 +37,21 @@ task sizes   # 関連 image のサイズ確認
 task down
 ```
 
-負荷を変える場合は Compose に環境変数を渡します。
+connection数、実行時間、HTTP pipelining、対象URLを変更できます。
 
 ```sh
-VUS=50 DURATION=60s docker compose --profile bench run --rm k6
+task bench CONNECTIONS=100 DURATION=30 PIPELINING=10
+task bench BENCH_URL='http://127.0.0.1:8080/api/posts/1' CONNECTIONS=50
+```
+
+method、header、body、worker数など、autocannonの追加オプションも渡せます。
+
+```sh
+task bench -- --workers 4 --latency
+task bench BENCH_URL='http://127.0.0.1:8080/api/posts' -- \
+  --method POST \
+  --headers content-type=application/json \
+  --body '{"userId":1,"title":"bench","body":"request"}'
 ```
 
 DB を volume ごと完全に作り直す場合だけ、次を実行します。

@@ -103,17 +103,5 @@ services:
       db:
         condition: service_healthy
 
-  k6:
-    image: grafana/k6:1.6.1
-    profiles: [bench]
-    volumes:
-      - ./bench:/scripts:ro
-    command: ["run", "/scripts/smoke.js"]
-    environment:
-      TARGET_URL: http://web:8080
-    depends_on:
-      web:
-        condition: service_healthy
-
 volumes:
   postgres-data:

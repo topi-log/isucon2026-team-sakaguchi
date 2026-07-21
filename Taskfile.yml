@@ -44,9 +44,21 @@ tasks:
       - pnpm test
 
   bench:
-    desc: k6 の smoke 負荷試験を実行する
+    desc: autocannon で負荷試験を実行する
+    vars:
+      CONNECTIONS: '{{default "10" .CONNECTIONS}}'
+      DURATION: '{{default "10" .DURATION}}'
+      PIPELINING: '{{default "1" .PIPELINING}}'
+      BENCH_URL: '{{default "http://127.0.0.1:8080/api/posts?limit=20" .BENCH_URL}}'
     cmds:
-      - docker compose --profile bench run --rm k6
+      - >-
+        pnpm exec autocannon
+        --connections {{.CONNECTIONS}}
+        --duration {{.DURATION}}
+        --pipelining {{.PIPELINING}}
+        --renderStatusCodes
+        {{.CLI_ARGS}}
+        '{{.BENCH_URL}}'
 
   tools:
     desc: pgweb を起動する

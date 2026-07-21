@@ -25,6 +25,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "autocannon": "8.0.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "typescript": "6.0.3",
