@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { parseLimit } from "./request.ts";
+import { parseCreatePostInput, parseLimit } from "./request.ts";
 
 describe("parseLimit", () => {
   it("uses the default for missing or invalid values", () => {
@@ -11,5 +11,28 @@ describe("parseLimit", () => {
     expect(parseLimit("0")).toBe(1);
     expect(parseLimit("50")).toBe(50);
     expect(parseLimit("101")).toBe(100);
+  });
+});
+
+describe("parseCreatePostInput", () => {
+  it("accepts and trims a valid input", () => {
+    expect(parseCreatePostInput({ userId: 1, title: " title ", body: " body " })).toEqual({
+      userId: 1,
+      title: "title",
+      body: "body",
+    });
+  });
+
+  it.each([
+    null,
+    {},
+    { userId: 0, title: "title", body: "body" },
+    { userId: 1.5, title: "title", body: "body" },
+    { userId: Number.MAX_SAFE_INTEGER + 1, title: "title", body: "body" },
+    { userId: 1, title: {}, body: "body" },
+    { userId: 1, title: "title", body: [] },
+    { userId: 1, title: " ", body: "body" },
+  ])("rejects invalid input: %j", (input) => {
+    expect(parseCreatePostInput(input)).toBeNull();
   });
 });

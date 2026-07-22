@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { pool, waitForDatabase } from "./db.ts";
-import { parseLimit } from "./request.ts";
-import { ensureStorageBucket } from "./storage.ts";
+import { parseCreatePostInput, parseLimit } from "./request.ts";
+import { ensureStorageBucket, fetchStorage, storageEndpoint } from "./storage.ts";
 
 const app = new Hono();
 const port = Number(process.env.PORT ?? 3000);
@@ -33,21 +33,29 @@ app.get("/api/posts", async (context) => {
   const limit = parseLimit(context.req.query("limit"));
   const result = await pool.query({
     text: `
+      WITH selected_posts AS MATERIALIZED (
+        SELECT id, user_id, title, body, created_at
+        FROM posts
+        ORDER BY created_at DESC
+        LIMIT $1
+      )
       SELECT
         p.id,
         p.title,
         p.body,
         u.display_name AS "authorName",
-        COUNT(DISTINCT c.id)::int AS "commentCount",
-        COUNT(DISTINCT l.user_id)::int AS "likeCount",
+        COALESCE(c.count, 0)::int AS "commentCount",
+        COALESCE(l.count, 0)::int AS "likeCount",
         p.created_at AS "createdAt"
-      FROM posts p
+      FROM selected_posts p
       JOIN users u ON u.id = p.user_id
-      LEFT JOIN comments c ON c.post_id = p.id
-      LEFT JOIN likes l ON l.post_id = p.id
-      GROUP BY p.id, u.display_name
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS count FROM comments WHERE post_id = p.id
+      ) c ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS count FROM likes WHERE post_id = p.id
+      ) l ON true
       ORDER BY p.created_at DESC
-      LIMIT $1
     `,
     values: [limit],
   });
@@ -76,24 +84,27 @@ app.get("/api/posts/:id", async (context) => {
 });
 
 app.post("/api/posts", async (context) => {
-  const body = await context.req.json<{ userId?: number; title?: string; body?: string }>();
-  if (!body.userId || !body.title?.trim() || !body.body?.trim()) {
+  let value: unknown;
+  try {
+    value = await context.req.json();
+  } catch {
     return context.json({ error: "userId, title and body are required" }, 400);
   }
+  const body = parseCreatePostInput(value);
+  if (!body) return context.json({ error: "userId, title and body are required" }, 400);
   const result = await pool.query({
     text: `INSERT INTO posts (user_id, title, body) VALUES ($1, $2, $3)
            RETURNING id, user_id AS "userId", title, body, created_at AS "createdAt"`,
-    values: [body.userId, body.title.trim(), body.body.trim()],
+    values: [body.userId, body.title, body.body],
   });
   return context.json({ post: result.rows[0] }, 201);
 });
 
 app.get("/api/storage", async (context) => {
-  const endpoint = process.env.AWS_ENDPOINT ?? "http://localhost:4566";
-  const response = await fetch(`${endpoint}/sakaguchi-assets?list-type=2`);
+  const response = await fetchStorage("/sakaguchi-assets?list-type=2");
   return context.json({
     status: response.ok ? "ok" : "error",
-    endpoint,
+    endpoint: storageEndpoint,
     httpStatus: response.status,
   });
 });

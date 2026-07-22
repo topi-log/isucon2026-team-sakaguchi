@@ -35,13 +35,19 @@ function App() {
         <h1>Sakaguchi Practice Feed</h1>
         <p>nginx / Hono / PostgreSQL / kumo</p>
       </header>
-      {error && <p className="error">API error: {error}</p>}
+      {error && (
+        <p className="error" role="alert">
+          API error: {error}
+        </p>
+      )}
       <section aria-label="投稿一覧">
         {posts.map((post) => (
           <article key={post.id}>
             <div className="meta">
               <span>{post.authorName}</span>
-              <time>{new Date(post.createdAt).toLocaleString("ja-JP")}</time>
+              <time dateTime={post.createdAt}>
+                {new Date(post.createdAt).toLocaleString("ja-JP")}
+              </time>
             </div>
             <h2>{post.title}</h2>
             <p>{post.body}</p>

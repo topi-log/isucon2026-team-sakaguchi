@@ -45,9 +45,15 @@ article h2 {
 }
 .meta {
   display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   justify-content: space-between;
   color: #687067;
   font-size: 0.8rem;
+}
+.meta > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 article footer {
   color: #bf3b20;
