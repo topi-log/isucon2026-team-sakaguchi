@@ -1,0 +1,19 @@
+[Unit]
+Description=Sakaguchi app server
+After=network-online.target postgresql.service kumo.service
+Wants=network-online.target
+Requires=postgresql.service kumo.service
+
+[Service]
+Type=simple
+User=sakaguchi
+Group=sakaguchi
+WorkingDirectory=/opt/sakaguchi/current
+EnvironmentFile=/etc/sakaguchi/app.env
+ExecStart=/usr/local/bin/node src/server/index.ts
+Restart=always
+RestartSec=1
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
