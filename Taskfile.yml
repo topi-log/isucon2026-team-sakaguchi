@@ -1,5 +1,8 @@
 version: "3"
 
+vars:
+  VM_INSTANCE: sakaguchi-practice
+
 tasks:
   default:
     desc: 利用可能な task を表示する
@@ -103,3 +106,143 @@ tasks:
     desc: Compose で使用中の image サイズを表示する
     cmds:
       - docker compose images
+
+  vm:doctor:
+    desc: Lima VM に必要なローカルコマンドとversionを検査する
+    cmds:
+      - |
+        test "$(uname -s)" = Darwin || {
+          echo "vmType vzを使うためmacOSが必要です" >&2
+          exit 1
+        }
+        for command in limactl task tar; do
+          command -v "${command}" >/dev/null || {
+            echo "${command}が見つかりません" >&2
+            exit 1
+          }
+        done
+        lima_version="$(limactl --version | awk '{print $3}')"
+        awk -v actual="${lima_version}" -v minimum="2.1.2" '
+          BEGIN {
+            split(actual, a, ".")
+            split(minimum, m, ".")
+            for (i = 1; i <= 3; i++) {
+              if ((a[i] + 0) > (m[i] + 0)) exit 0
+              if ((a[i] + 0) < (m[i] + 0)) exit 1
+            }
+          }
+        ' || {
+          echo "Lima 2.1.2以上が必要です（現在: ${lima_version}）" >&2
+          exit 1
+        }
+        limactl template validate vm/lima.yaml
+
+  vm:setup:
+    desc: VM を作成し、app一式をdeployする
+    cmds:
+      - task: vm:doctor
+      - task: vm:up
+      - task: vm:deploy
+      - task: vm:status
+
+  vm:up:
+    desc: VM を作成または起動する
+    cmds:
+      - |
+        instance='{{.VM_INSTANCE}}'
+        if ! status="$(limactl list "${instance}" --format '{{`{{.Status}}`}}' 2>/dev/null)"; then
+          limactl create --tty=false --name "${instance}" vm/lima.yaml
+          limactl start --tty=false "${instance}"
+        elif [ "${status}" = "Stopped" ]; then
+          limactl start --tty=false "${instance}"
+        elif [ "${status}" = "Running" ]; then
+          echo "${instance}は起動済みです"
+        else
+          echo "${instance}の状態を扱えません: ${status}" >&2
+          exit 1
+        fi
+
+  vm:down:
+    desc: VM を停止する
+    cmds:
+      - |
+        instance='{{.VM_INSTANCE}}'
+        if ! status="$(limactl list "${instance}" --format '{{`{{.Status}}`}}' 2>/dev/null)"; then
+          echo "${instance}は未作成です"
+        elif [ "${status}" = "Running" ]; then
+          limactl stop "${instance}"
+        else
+          echo "${instance}は停止済みです"
+        fi
+
+  vm:ssh:
+    desc: VM にSSH接続する
+    interactive: true
+    cmds:
+      - limactl shell {{.VM_INSTANCE}}
+
+  vm:sync:
+    desc: sourceをVMの一時directoryへ同期する
+    cmds:
+      - |
+        LC_ALL=C COPYFILE_DISABLE=1 tar \
+          --no-mac-metadata \
+          --no-xattrs \
+          --exclude ./.git \
+          --exclude ./node_modules \
+          --exclude ./dist \
+          --exclude ./.env \
+          -cf - . |
+          limactl shell {{.VM_INSTANCE}} sh -c \
+            'rm -rf /tmp/sakaguchi-source && mkdir -p /tmp/sakaguchi-source && tar -xf - -C /tmp/sakaguchi-source'
+
+  vm:deploy:
+    desc: sourceを同期し、VMを同じ構成へ収束させる
+    cmds:
+      - task: vm:sync
+      - >-
+        limactl shell {{.VM_INSTANCE}} sudo
+        /tmp/sakaguchi-source/vm/provision.sh /tmp/sakaguchi-source
+
+  vm:status:
+    desc: VM内serviceの状態を表示する
+    cmds:
+      - >-
+        limactl shell {{.VM_INSTANCE}} sudo systemctl --no-pager --full status
+        nginx postgresql kumo sakaguchi-app
+
+  vm:logs:
+    desc: VM内serviceのjournalを追跡する
+    interactive: true
+    cmds:
+      - >-
+        limactl shell {{.VM_INSTANCE}} sudo journalctl -f
+        -u nginx -u postgresql -u kumo -u sakaguchi-app
+
+  vm:bench:
+    desc: VMのnginxへautocannonで負荷試験を実行する
+    cmds:
+      - >-
+        task bench BENCH_URL='http://127.0.0.1:18080/api/posts?limit=20'
+        CONNECTIONS={{default "10" .CONNECTIONS}}
+        DURATION={{default "10" .DURATION}}
+        PIPELINING={{default "1" .PIPELINING}}
+        -- {{.CLI_ARGS}}
+
+  vm:delete:
+    desc: VM とVM内のDBを完全に削除する
+    cmds:
+      - |
+        instance='{{.VM_INSTANCE}}'
+        confirm='{{default "" .CONFIRM}}'
+        if [ "${confirm}" != "${instance}" ]; then
+          echo "VM diskとPostgreSQLの全データを削除します。" >&2
+          echo "実行するには CONFIRM=${instance} を指定してください。" >&2
+          exit 1
+        fi
+        echo "${instance}のVM diskとPostgreSQLの全データを削除します。"
+        if limactl list "${instance}" >/dev/null 2>&1; then
+          limactl delete --force "${instance}"
+        else
+          echo "${instance}は未作成です"
+        fi

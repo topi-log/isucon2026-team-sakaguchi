@@ -1,6 +1,6 @@
 # Sakaguchi ローカル練習環境
 
-軽量なコンテナを中心にした、最小の Sakaguchi Web アプリです。
+軽量なコンテナを中心にした、最小の Sakaguchi Web アプリです。普段のコード・SQL・nginx改善はDocker Compose、本番同様のsystemd操作を含む総合練習はUbuntu VMで行えます。
 
 ## 構成
 
@@ -69,6 +69,32 @@ DB を volume ごと完全に作り直す場合だけ、次を実行します。
 docker compose down -v
 task up
 ```
+
+## systemdを使うVM練習
+
+macOSでは、LimaでUbuntu 24.04のVMを統一して作成できます。初回だけLimaとTaskを用意し、次を実行します。
+
+```sh
+brew install lima go-task
+task vm:setup
+```
+
+VM内ではnginx、app server、PostgreSQL、kumoを別々のsystemd serviceとして操作できます。ホストからは <http://127.0.0.1:18080> へアクセスします。
+VMはUbuntu 24.04標準のPostgreSQL 16を使い、Compose環境のPostgreSQL 17とはmajor versionが異なります。
+
+```sh
+task vm:up       # VMを起動
+task vm:down     # VMを停止
+task vm:ssh      # VMへ接続
+task vm:deploy   # source同期、build、service再起動
+task vm:status   # systemd serviceの状態
+task vm:logs     # journalを追跡
+task vm:bench    # VMへ負荷試験
+```
+
+`task vm:delete CONFIRM=sakaguchi-practice`はVM diskとVM内のPostgreSQLデータを完全に削除します。
+
+VMは各Macのnative architectureで動きます。Intel MacとApple Siliconでは実行条件が異なるため、VM間のscoreは直接比較できません。
 
 ## ローカル開発
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=Kumo AWS emulator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kumo
+Group=kumo
+WorkingDirectory=/var/lib/kumo
+ExecStart=/usr/local/bin/kumo serve --host 127.0.0.1 --port 4566
+ExecStartPost=/bin/sh -c 'i=0; until curl -fsS http://127.0.0.1:4566/health >/dev/null; do i=$((i + 1)); [ "$i" -ge 30 ] && exit 1; sleep 1; done'
+Restart=always
+RestartSec=1
+TimeoutStartSec=35
+
+[Install]
+WantedBy=multi-user.target
