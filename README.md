@@ -12,7 +12,7 @@
 - autocannon: connection数やpipeliningを変更できるHTTP負荷試験
 - pgweb: 任意起動の DB UI
 
-runtime image は Alpine と multi-stage build を使います。pgweb は通常起動には含まれません。
+runtime image は Alpine と multi-stage build を使います。nginx は `nginx`、app server は `app` という別コンテナで起動します。pgweb は通常起動には含まれません。
 
 ## 起動
 
@@ -22,7 +22,7 @@ task up
 task ports
 ```
 
-ホスト側ポートは起動時に空きポートを自動割り当てします。`task up`と`task ports`に表示されたwebのURLをブラウザで開いてください。PostgreSQLは接続文字列を表示します。コンテナ内ではweb `8080`、PostgreSQL `5432`、kumo `4566`のままです。
+ホスト側ポートは起動時に空きポートを自動割り当てします。`task up`と`task ports`に表示されたnginxのURLをブラウザで開いてください。PostgreSQLは接続文字列を表示します。コンテナ内ではnginx `8080`、PostgreSQL `5432`、kumo `4566`のままです。
 
 固定したい場合は、`.env`の該当項目だけ設定します。
 
@@ -39,7 +39,7 @@ POSTGRES_PORT=15432
 task bench   # autocannonで負荷試験
 task stats   # pg_stat_statements の重いクエリ上位を表示
 task reset   # seed data を初期状態に戻す
-task logs    # nginx / API / PostgreSQL / kumo の timing log
+task logs    # nginx / app server / PostgreSQL / kumo の timing log
 task ports   # ホストに割り当てられたポートを表示
 task tools   # pgwebを起動し、割り当てられたポートを表示
 task sizes   # 関連 image のサイズ確認
@@ -81,7 +81,7 @@ pnpm test
 pnpm build
 ```
 
-API は `DATABASE_URL` を指定して `node --watch src/server/index.ts`、frontend は `vp dev` で個別起動できます。
+app server は `DATABASE_URL` を指定して `pnpm dev:app`、frontend は `pnpm dev` で個別起動できます。
 
 ## API
 
