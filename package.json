@@ -1,0 +1,34 @@
+{
+  "name": "sakaguchi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vp dev --host 0.0.0.0",
+    "dev:api": "node --watch src/server/index.ts",
+    "build": "vp build",
+    "check": "vp check src index.html vite.config.ts",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.11",
+    "hono": "4.12.31",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/pg": "8.20.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "autocannon": "8.0.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "typescript": "6.0.3",
+    "vite-plus": "0.2.5"
+  }
+}

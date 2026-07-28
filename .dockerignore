@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+node_modules
+dist
+.vite
+.vite-plus
+*.log
+README.md
