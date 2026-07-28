@@ -21,14 +21,14 @@ tasks:
     desc: seed data と S3 bucket を初期状態に戻す
     cmds:
       - |
-        web_port="$(docker compose port web 8080 | awk -F: '{print $NF}')"
+        nginx_port="$(docker compose port nginx 8080 | awk -F: '{print $NF}')"
         curl -fsS -X POST -H 'x-initialize-token: sakaguchi-local' \
-          "http://127.0.0.1:${web_port}/api/initialize"
+          "http://127.0.0.1:${nginx_port}/api/initialize"
 
   logs:
     desc: nginx、API、PostgreSQL、kumo のログを追跡する
     cmds:
-      - docker compose logs -f web api db kumo
+      - docker compose logs -f nginx api db kumo
 
   ps:
     desc: コンテナの状態を表示する
@@ -39,7 +39,7 @@ tasks:
     desc: ホストに自動割り当てされたポートを表示する
     cmds:
       - |
-        for mapping in web:8080 db:5432 kumo:4566 pgweb:8081; do
+        for mapping in nginx:8080 db:5432 kumo:4566 pgweb:8081; do
           service="${mapping%%:*}"
           container_port="${mapping##*:}"
           host_address="$(docker compose port "${service}" "${container_port}" 2>/dev/null || true)"
@@ -72,8 +72,8 @@ tasks:
       - |
         bench_url='{{.BENCH_URL}}'
         if [ -z "${bench_url}" ]; then
-          web_port="$(docker compose port web 8080 | awk -F: '{print $NF}')"
-          bench_url="http://127.0.0.1:${web_port}/api/posts?limit=20"
+          nginx_port="$(docker compose port nginx 8080 | awk -F: '{print $NF}')"
+          bench_url="http://127.0.0.1:${nginx_port}/api/posts?limit=20"
         fi
         pnpm exec autocannon \
           --connections {{.CONNECTIONS}} \

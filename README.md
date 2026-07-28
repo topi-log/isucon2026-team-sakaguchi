@@ -12,7 +12,7 @@
 - autocannon: connection数やpipeliningを変更できるHTTP負荷試験
 - pgweb: 任意起動の DB UI
 
-runtime image は Alpine と multi-stage build を使います。pgweb は通常起動には含まれません。
+runtime image は Alpine と multi-stage build を使います。nginx は `nginx`、app server は `api` という別コンテナで起動します。pgweb は通常起動には含まれません。
 
 ## 起動
 
@@ -22,7 +22,7 @@ task up
 task ports
 ```
 
-ホスト側ポートは起動時に空きポートを自動割り当てします。`task up`と`task ports`に表示されたwebのURLをブラウザで開いてください。PostgreSQLは接続文字列を表示します。コンテナ内ではweb `8080`、PostgreSQL `5432`、kumo `4566`のままです。
+ホスト側ポートは起動時に空きポートを自動割り当てします。`task up`と`task ports`に表示されたnginxのURLをブラウザで開いてください。PostgreSQLは接続文字列を表示します。コンテナ内ではnginx `8080`、PostgreSQL `5432`、kumo `4566`のままです。
 
 固定したい場合は、`.env`の該当項目だけ設定します。
 

@@ -5,12 +5,12 @@ x-service-defaults: &service-defaults
   init: true
 
 services:
-  web:
+  nginx:
     <<: *service-defaults
     build:
       context: .
       dockerfile: docker/app.Dockerfile
-      target: web
+      target: nginx
     ports:
       - target: 8080
         published: "${APP_PORT:-0}"

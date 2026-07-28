@@ -24,7 +24,7 @@ USER node
 EXPOSE 3000
 CMD ["node", "src/server/index.ts"]
 
-FROM nginx:1.29-alpine AS web
+FROM nginx:1.29-alpine AS nginx
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
 EXPOSE 8080
