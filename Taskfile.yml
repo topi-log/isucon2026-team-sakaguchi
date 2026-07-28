@@ -26,9 +26,9 @@ tasks:
           "http://127.0.0.1:${nginx_port}/api/initialize"
 
   logs:
-    desc: nginx、API、PostgreSQL、kumo のログを追跡する
+    desc: nginx、app server、PostgreSQL、kumo のログを追跡する
     cmds:
-      - docker compose logs -f nginx api db kumo
+      - docker compose logs -f nginx app db kumo
 
   ps:
     desc: コンテナの状態を表示する

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vp dev --host 0.0.0.0",
-    "dev:api": "node --watch src/server/index.ts",
+    "dev:app": "node --watch src/server/index.ts",
     "build": "vp build",
     "check": "vp check src index.html vite.config.ts",
     "test": "vp test"

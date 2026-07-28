@@ -11,7 +11,7 @@ COPY index.html tsconfig.json vite.config.ts ./
 COPY src/frontend ./src/frontend
 RUN pnpm exec vp build
 
-FROM node:24-alpine AS api
+FROM node:24-alpine AS app
 ENV NODE_ENV=production
 WORKDIR /app
 RUN corepack enable
