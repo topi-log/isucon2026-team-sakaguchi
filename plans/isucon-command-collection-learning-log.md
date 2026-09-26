@@ -207,6 +207,24 @@ sudo mysqldumpslow -s t -t 10 /var/log/mysql/mysql-slow.log | less
 sudo mysql -u root
 ```
 
+### MySQLのロック待ちを確認する
+
+`id_generator`を含むテーブルのロック待ちと、待機側・ブロック側のクエリを確認する。
+
+```sql
+SELECT
+  wait_started,
+  wait_age,
+  locked_table,
+  locked_index,
+  waiting_pid,
+  blocking_pid,
+  waiting_query,
+  blocking_query
+FROM sys.innodb_lock_waits
+WHERE locked_table LIKE '%id_generator%';
+```
+
 ### スキーマの確認
 
 ```sql
