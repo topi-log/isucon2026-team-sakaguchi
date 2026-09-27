@@ -109,6 +109,10 @@ pnpm build
 
 app server は `DATABASE_URL` を指定して `pnpm dev:app`、frontend は `pnpm dev` で個別起動できます。
 
+## 学習ログ
+
+- [ISUCON学習ログ：練習で使うコマンド集](plans/isucon-command-collection-learning-log.md) — private-isuのセットアップ、ログ設定、計測、最適化をまとめた記録
+
 ## API
 
 - `GET /api/health`
