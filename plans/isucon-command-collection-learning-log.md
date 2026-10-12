@@ -197,7 +197,7 @@ sudo truncate -s 0 /var/log/nginx/access.log &&
 
 ### スロークエリログ
 
-```sql
+```bash
 sudo mysqldumpslow -s t -t 10 /var/log/mysql/mysql-slow.log | less
 ```
 
@@ -432,3 +432,86 @@ location @app {
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+## pproteinでCPU・HTTP・SQLをまとめて計測する
+
+pproteinを使うと、同じベンチマーク中のCPU使用状況、HTTPアクセスログ、SQLの実行時間をまとめて確認できる。
+以下は[pprotein導入・確認手順](https://scrapbox.io/sorafujitani/pprotein_integ)に記載された、導入済みのGoアプリ環境向けの手順。この記事のprivate-isuのRuby環境とは、アプリの配置先・サービス名・ログ形式が異なる。
+
+### 導入済み環境の構成
+
+| 対象 | 配置・設定 |
+| --- | --- |
+| pprotein v1.2.4 | `/home/isucon/bin/pprotein`。画面は9000番 |
+| pprotein-agent | `/home/isucon/bin/pprotein-agent`。ログ取得は19000番で、localhost限定 |
+| Goアプリ | `webapp/go/profiling.go`で`127.0.0.1:6060`にpprofを追加し、`main.go`から起動 |
+| Nginx | `/etc/nginx/conf.d/pprotein.conf`で`/var/log/nginx/pprotein-access.log`にLTSV形式のアクセスログを出力 |
+| MySQL | スロークエリログを有効にし、`long_query_time=0`。出力先は`/var/log/mysql/mysql-slow.log` |
+| 集計ツール | 既存の`~/.local/bin/alp`、`~/.local/bin/slp`とGraphvizを使用 |
+
+設定の控えは`/home/isucon/pprotein/config/`、サービス定義は`/home/isucon/pprotein/systemd/`にある。
+実際に使う設定と計測結果は`/home/isucon/pprotein/data/`に保存され、pprotein-agentは補助グループ`adm`でログを読み取る。
+この節のNginxログはLTSV形式で、前述の`alp json`に渡すJSONログとは別のファイル。
+
+### 手元のPCから画面を開く
+
+導入済みの場合はここから始める。手元のPCのターミナルで、SSH接続を通じてサーバーの9000番を転送する。
+次の`-F`には、参照元の環境で使うSSH設定ファイルを指定している。別の環境では、普段使うSSH設定ファイルと接続先に置き換える。
+
+```bash
+ssh -F ~/.ssh/prox-isu-portal/79904627-26ab-4ff9-a5e8-d9ec3f189dce/config \
+  -N -L 9000:127.0.0.1:9000 \
+  -o ExitOnForwardFailure=yes isucon-01
+```
+
+何も表示されず待機していれば、ブラウザで`http://localhost:9000/`を開く。
+VS Codeは不要。接続を終了するときは、このターミナルで`Ctrl+C`を押す。
+
+### ベンチマークと同時に計測する
+
+1. 画面のグループ計測の`Collect`を押す。
+2. すぐにベンチマークを実行する。
+3. 60秒後、同じグループの結果を開く。
+
+| 結果 | 確認すること |
+| --- | --- |
+| `isuconquest-cpu` / pprof | CPUを使っているGoの関数 |
+| `nginx` / httplog | 時間がかかるAPI。ユーザーIDなどが異なるURLはまとめて集計 |
+| `mysql` / slowlog | 時間がかかるSQL |
+
+計測時間は画面のtargets設定の`Duration`で変更する。ログは計測中に追記された部分が対象。
+
+### 状態とログを確認する
+
+画面を開けない、または結果が出ない場合は、サーバー上でサービスの状態とログを確認する。
+
+```bash
+sudo systemctl status pprotein pprotein-agent isuconquest.go
+sudo journalctl -u pprotein -u pprotein-agent -n 50 --no-pager
+```
+
+### 導入時の設定配置とGoアプリの反映
+
+以下は参照元の環境で実施済みの設定配置手順。設定ファイルとサービス定義が既に用意されていることが前提で、pprotein本体のインストール手順は含まない。
+サーバー上で実行する。
+
+```bash
+cd /home/isucon/pprotein
+sudo install -D -m 644 config/nginx-pprotein.conf /etc/nginx/conf.d/pprotein.conf
+sudo nginx -t && sudo systemctl reload nginx
+sudo install -m 644 systemd/pprotein*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pprotein pprotein-agent
+```
+
+Goアプリを変更した場合は、サーバー上で実行ファイルを作り直し、サービスを再起動する。
+
+```bash
+cd /home/isucon/webapp/go
+go build -buildvcs=false -o isuconquest.new .
+mv isuconquest.new isuconquest
+sudo systemctl restart isuconquest.go
+```
+
+参照元では、導入時の5秒間の動作確認でCPU・HTTP・SQLの収集とレポート生成が成功したと記録されている。
+公式リポジトリ：[kaz/pprotein](https://github.com/kaz/pprotein)。
