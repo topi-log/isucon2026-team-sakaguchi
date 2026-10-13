@@ -111,7 +111,7 @@ app server は `DATABASE_URL` を指定して `pnpm dev:app`、frontend は `pnp
 
 ## 学習ログ
 
-- [ISUCON学習ログ：練習で使うコマンド集](plans/isucon-command-collection-learning-log.md) — private-isuのセットアップ、ログ設定、計測、最適化をまとめた記録
+- [ISUCON練習手順](plans/isucon-command-collection-learning-log.md) — private-isuの準備、計測、SQL調査、変更の反映
 - [pproteinの導入・計測手順](plans/isucon-command-collection-learning-log.md#pproteinでcpuhttpsqlをまとめて計測する) — Goアプリ環境向けのインストール、初期設定、SSH転送、CPU・HTTP・SQLの収集
 
 ## API

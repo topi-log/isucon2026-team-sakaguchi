@@ -1,112 +1,79 @@
-# ISUCON学習ログ：練習で使うコマンド集
+# ISUCON練習手順
 
-private-isuの練習で使うコマンドを、ツールのセットアップ、ログ出力の設定、設定の反映、計測、最適化の順にまとめた。
+private-isuの準備・計測・変更と、Goアプリ環境でのpprotein計測を行うための手順。
+このチームリポジトリ自体の起動手順は、[README](../README.md)を参照する。
 
-## ツールをセットアップする
+## 対象と実行ルール
 
-UbuntuまたはDebianの競技用サーバーで、先にVimをインストールする。rootユーザーでは`sudo`を外す。
+- private-isu：Ubuntu/Debian、Nginx、MySQL、Ruby（Unicorn）が導入済みの練習サーバー。
+- pprotein：後半の「pproteinでCPU・HTTP・SQLをまとめて計測する」だけを使う。private-isuのRuby環境には適用しない。
+- サーバーのコマンドはSSH接続後に実行する。ローカルのコマンドは手元のMacで実行する。
+- サーバーではsudo権限が必要。rootユーザーで作業する場合は`sudo`を外す。
+- 同じコードブロックは同じシェルで上から順に実行する。導入・変更に失敗したら原因を確認してから続ける。
+- 設定変更前には元のファイルを退避する。
+- ログの消去は保存済みの計測結果を確認してから行う。SQL・アプリ・設定の変更例は必要なものだけ実行する。
+
+以下の接続先・パス・サービス名は例。実環境と一致しない場合は置き換える。
+
+| 対象 | この文書の例 |
+| --- | --- |
+| SSH接続先 | `isucon-01` |
+| private-isuのアプリ | `/home/isucon/private_isu.git/webapp` |
+| Rubyサービス | `isu-ruby.service` |
+| Nginxのサイト設定 | `/etc/nginx/sites-available/isucon.conf` |
+| ローカルの作業先 | `~/work/private-isu-local` |
+
+ベンチマークは練習環境のコマンドを別途用意する。この文書では実行方法を指定しない。
+
+## 1. private-isuの計測を準備する
+
+実行場所：サーバー。初回だけ行う。
+
+### 1.1. ツールを導入する
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y vim
+sudo apt-get update && sudo apt-get install -y vim curl ca-certificates
 ```
 
-### Bashの補完と履歴検索
-
-[dotfilesのBash設定](https://github.com/sorafujitani/dotfiles/tree/main/dot_config/bash)を使う場合は、UbuntuまたはDebianのBash 4以上と、root権限またはsudo権限が必要。
-SSH先で普段使うユーザーとして、`~/setup-remote-bash.sh`を作成し、次の内容を保存する。
+alpはHTTPアクセスログ、pt-query-digestはMySQLのスロークエリログを集計する。
+alpを導入する。対応アーキテクチャはamd64とarm64。
 
 ```bash
-vim ~/setup-remote-bash.sh
+(
+  set -eu
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo '未対応のアーキテクチャ' >&2; exit 1 ;;
+  esac
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  curl -fL -o "$work/alp.tar.gz" \
+    "https://github.com/tkuchiki/alp/releases/download/v1.0.21/alp_linux_${arch}.tar.gz"
+  tar -xzf "$work/alp.tar.gz" -C "$work"
+  sudo install -m 755 "$work/alp" /usr/local/bin/alp
+)
+sudo apt-get install -y percona-toolkit
 ```
 
-```bash
-#!/usr/bin/env bash
-set -e
-
-if (( EUID == 0 )); then
-  apt-get update
-  apt-get install -y curl ca-certificates
-else
-  sudo apt-get update
-  sudo apt-get install -y curl ca-certificates
-fi
-
-config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/bash"
-download_dir=$(mktemp -d)
-trap 'rm -rf -- "$download_dir"' EXIT
-base_url=https://raw.githubusercontent.com/sorafujitani/dotfiles/main/dot_config/bash
-for file in interactive.bash setup.sh; do
-  curl -fL --retry 2 "$base_url/$file" -o "$download_dir/$file"
-done
-
-mkdir -p "$config_dir"
-for file in interactive.bash setup.sh; do
-  if [[ -e "$config_dir/$file" ]]; then
-    cp -p "$config_dir/$file" "$config_dir/$file.backup.$(date +%Y%m%d%H%M%S).$$"
-  fi
-  cp "$download_dir/$file" "$config_dir/$file"
-done
-bash "$config_dir/setup.sh"
-```
-
-保存後、同じSSH先で実行してBashを開き直す。
+確認：両方のバージョンが表示されること。
 
 ```bash
-bash ~/setup-remote-bash.sh && exec bash -l
-```
-
-この手順は`interactive.bash`と`setup.sh`を`${XDG_CONFIG_HOME:-$HOME/.config}/bash`へ配置する。
-既存ファイルがあれば退避してからBashの読込み設定を追加する。
-`setup.sh`は補完と履歴検索に使うツールのほか、`alp`と`pt-query-digest`も導入する。
-セットアップが成功した場合は、後述の`alp`と`pt-query-digest`の手動導入は不要。
-`isucon`ユーザーの`~/.local/bin/alp`を`/usr/local/bin`にも配置する場合は、次のコマンドを実行する。
-
-```bash
-sudo install -m 755 /home/isucon/.local/bin/alp /usr/local/bin/alp
-```
-
-### alp
-
-上記のBashセットアップを使わない場合は、手動で導入する。
-
-競技用サーバーでアーキテクチャを確認し、`/tmp`へ移動する。
-
-```bash
-uname -m
-cd /tmp
-```
-
-alpのamd64版をダウンロードして展開し、実行ファイルを配置する。
-
-```bash
-curl -fLO https://github.com/tkuchiki/alp/releases/download/v1.0.21/alp_linux_amd64.tar.gz
-tar -xzf alp_linux_amd64.tar.gz
-sudo install -m 0755 alp /usr/local/bin/alp
 alp --version
-```
-
-### pt-query-digest
-
-上記のBashセットアップを使わない場合は、手動で導入する。
-
-```bash
-sudo apt update
-sudo apt install percona-toolkit
 pt-query-digest --version
 ```
 
-## ログの出力を設定する
+### 1.2. NginxのJSONログを設定する
 
-### NginxのアクセスログをJSON形式にする
-
-競技用サーバーでNginxの設定ファイルを開く。
+設定を退避してから編集する。
 
 ```bash
+sudo cp -p /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.before-$(date +%Y%m%d-%H%M%S)"
 sudo vim /etc/nginx/nginx.conf
 ```
 
-`http { ... }`ブロック内にJSON形式のログ設定を追記、または確認する。
+`http { ... }`内へ追加する。同名の定義がある場合は、新設せずその定義を変更する。
+対象の`server`や`location`に別の`access_log`設定がある場合は、そちらも確認する。
 
 ```nginx
 log_format json escape=json '{"time":"$time_iso8601",'
@@ -123,53 +90,52 @@ log_format json escape=json '{"time":"$time_iso8601",'
 access_log /var/log/nginx/access.log json;
 ```
 
-### Nginxの設定を検査して再読み込みする
-
-設定を検査し、成功した場合だけNginxへ反映する。
+構文検査に成功した場合だけ再読み込みする。
 
 ```bash
-sudo nginx -t
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
+curl -I http://localhost/
+sudo tail -n 1 /var/log/nginx/access.log
 ```
 
-### MySQLのスロークエリ設定
+確認：新しいアクセスログがJSON形式で、`request_method`・`request_uri`・`request_time`を含むこと。
+古い形式のログは残っていてもよい。次の計測前に消去する。
 
-競技用サーバーでMySQLの設定ファイルを開く。
+### 1.3. MySQLのスロークエリログを設定する
 
 ```bash
 sudo mkdir -p /etc/mysql/mysql.conf.d
 sudo touch /etc/mysql/mysql.conf.d/mysqld.cnf
+sudo cp -p /etc/mysql/mysql.conf.d/mysqld.cnf \
+  "/etc/mysql/mysql.conf.d/mysqld.cnf.before-$(date +%Y%m%d-%H%M%S)"
 sudo vim /etc/mysql/mysql.conf.d/mysqld.cnf
 ```
+
+既存の`[mysqld]`内に設定する。同じ設定を重複して追加しない。
 
 ```ini
 [mysqld]
 slow_query_log = 1
 slow_query_log_file = /var/log/mysql/mysql-slow.log
 long_query_time = 0
+log_output = FILE
 ```
+
+`long_query_time=0`はログ量が増えるため、空き容量を確認する。
+構文検査に成功した場合だけMySQLを再起動する。再起動中はDB接続が切れる。
+`--validate-config`が未対応の場合は、MySQLのバージョンと検査方法を確認してから続ける。
 
 ```bash
-sudo mysqld --validate-config
-sudo systemctl restart mysql
-sudo systemctl status mysql
+sudo mysqld --validate-config && sudo systemctl restart mysql
+sudo systemctl status mysql --no-pager
+sudo mysql -e "SHOW VARIABLES WHERE Variable_name IN (
+  'slow_query_log', 'slow_query_log_file', 'long_query_time', 'log_output'
+);"
 ```
 
-設定が反映されたことを確認する。
+確認：`slow_query_log=ON`、`long_query_time=0`、`log_output=FILE`と指定したログパスが表示されること。
 
-```bash
-sudo mysql -e "
-  SHOW VARIABLES
-  WHERE Variable_name IN (
-    'slow_query_log',
-    'slow_query_log_file',
-    'long_query_time',
-    'log_output'
-  );
-"
-```
-
-権限の問題で書き込めない場合
+ログへ書き込めない場合だけ、ファイルの所有者と権限を修正する。
 
 ```bash
 sudo touch /var/log/mysql/mysql-slow.log
@@ -177,17 +143,14 @@ sudo chown mysql:adm /var/log/mysql/mysql-slow.log
 sudo chmod 640 /var/log/mysql/mysql-slow.log
 ```
 
-mysqlで問題が起こっていそうな時
+## 2. private-isuを計測する
 
-```bash
-sudo journalctl -xeu mysql --no-pager
-```
+実行場所：サーバー。ベンチマークごとに繰り返す。
+スコアと集計結果は、変更前後の比較用に保存する。
 
-## 計測コマンド
+### 2.1. ログを消去してベンチマークを実行する
 
-### ベンチマーク前にログを空にする
-
-ベンチマークを回す直前に、アクセスログとスロークエリログを空にし、ログを開き直す。
+注意：次のコマンドは既存のログを消去する。必要な結果は先に保存する。
 
 ```bash
 sudo truncate -s 0 /var/log/nginx/access.log &&
@@ -196,92 +159,9 @@ sudo truncate -s 0 /var/log/nginx/access.log &&
   sudo systemctl reload nginx
 ```
 
-### スロークエリログ
+すべて成功したら、練習環境のベンチマークを実行する。
 
-```bash
-sudo mysqldumpslow -s t -t 10 /var/log/mysql/mysql-slow.log | less
-```
-
-### MySQLに接続
-
-```bash
-sudo mysql -u root
-```
-
-### MySQLのロック待ちを確認する
-
-`id_generator`を含むテーブルのロック待ちと、待機側・ブロック側のクエリを確認する。
-
-```sql
-SELECT
-  wait_started,
-  wait_age,
-  locked_table,
-  locked_index,
-  waiting_pid,
-  blocking_pid,
-  waiting_query,
-  blocking_query
-FROM sys.innodb_lock_waits
-WHERE locked_table LIKE '%id_generator%';
-```
-
-### スキーマの確認
-
-```sql
-SHOW DATABASES;
-USE データベース名;
-SHOW CREATE TABLE comments;
-```
-
-### 実行計画
-
-```sql
-EXPLAIN SELECT * FROM comments
-WHERE post_id = 1
-ORDER BY created_at DESC
-LIMIT 1;
-```
-
-### インデックスを貼る
-
-```sql
-ALTER TABLE comments
-ADD INDEX post_id_idx (post_id, created_at DESC);
-```
-
-### Unicornのプロセス数
-
-rbの設定ファイルの場所を探す
-
-```bash
-sudo find / -name 'unicorn_config.rb' 2>/dev/null
-```
-
-設定更新
-
-```bash
-sudo systemctl restart isu-ruby.service
-```
-
-### JSONログの出力を確認する
-
-古いログやテキスト形式のログを空にしてから、テストリクエストを送る。
-
-```bash
-sudo truncate -s 0 /var/log/nginx/access.log
-curl -I http://localhost/
-```
-
-ログの先頭行がJSON形式であることを確認する。
-
-```bash
-sudo head -n 1 /var/log/nginx/access.log
-```
-
-### alpでアクセスログを集計する
-
-`alp json`でアクセスログを解析、集計する。
+### 2.2. HTTPログを集計する
 
 ```bash
 sudo alp json \
@@ -294,21 +174,57 @@ sudo alp json \
   -o count,method,uri,min,avg,max,sum
 ```
 
-### pt-query-digestでスロークエリを集計する
+確認：合計時間`sum`が大きいAPIから調べる。
+JSON解析に失敗した場合は、対象ファイルの新しい行がJSON形式か確認する。
 
-スロークエリログを表示する。
+### 2.3. SQLログを集計する
 
 ```bash
 sudo pt-query-digest /var/log/mysql/mysql-slow.log | less
 ```
 
-解析結果をファイルへ保存する。
+結果を保存する場合：
 
 ```bash
-sudo pt-query-digest /var/log/mysql/mysql-slow.log | tee "digest_$(date +%Y%m%d%H%M).txt"
+sudo pt-query-digest /var/log/mysql/mysql-slow.log \
+  | tee "digest_$(date +%Y%m%d-%H%M%S).txt"
 ```
 
-### 投稿一覧のSQLを確認する
+上位10件を簡易表示する場合：
+
+```bash
+sudo mysqldumpslow -s t -t 10 /var/log/mysql/mysql-slow.log | less
+```
+
+確認：実行時間と実行回数が大きいSQLを選び、次の手順で調べる。
+
+## 3. MySQLの原因を調べる
+
+実行場所：サーバー。SQLブロックはMySQLクライアント内で実行する。
+
+### 3.1. 対象データベースに接続する
+
+一覧から対象DBを確認し、`DB_NAME`に設定して接続する。空のままでは接続しない。
+
+```bash
+sudo mysql -u root -e 'SHOW DATABASES;'
+DB_NAME='' # 確認したデータベース名を設定する
+sudo mysql -u root "${DB_NAME:?DB_NAMEを設定してください}"
+```
+
+### 3.2. テーブル定義と実行計画を確認する
+
+次は`comments`テーブルの例。調査対象のテーブル・SQLに置き換える。
+
+```sql
+SHOW CREATE TABLE comments;
+EXPLAIN SELECT * FROM comments
+WHERE post_id = 1
+ORDER BY created_at DESC
+LIMIT 1;
+```
+
+投稿一覧のSQLを確認する場合：
 
 ```sql
 SELECT `id`, `user_id`, `body`, `created_at`, `mime`
@@ -316,107 +232,117 @@ FROM `posts`
 ORDER BY `created_at` DESC;
 ```
 
-## 最適化コマンド
+確認：既存のインデックス、実行計画で使うキー、読み取り行数を確認する。
 
-### VS Codeでサーバーに接続する
+### 3.3. ロック待ちを確認する
 
-VS CodeにMicrosoftのRemote - SSH拡張機能をインストールする。
+次は`id_generator`を含むテーブルの例。対象が異なる場合は絞り込み条件を変更する。
 
-1. `Cmd + Shift + P`でコマンドパレットを開く。
-2. `Remote-SSH: Connect to Host...`を選ぶ。
-3. 普段ターミナルからSSH接続するときと同じ接続先を選ぶ。例えば、普段`ssh isucon-01`なら`isucon-01`を選ぶ。
-4. 接続後、「ファイル → フォルダーを開く」で次のパスを指定する。
-
-```text
-/home/isucon/private_isu.git/webapp
+```sql
+SELECT
+  wait_started, wait_age, locked_table, locked_index,
+  waiting_pid, blocking_pid, waiting_query, blocking_query
+FROM sys.innodb_lock_waits
+WHERE locked_table LIKE '%id_generator%';
 ```
 
-### Macへコードと設定をコピーする
+確認：待機側・ブロック側の接続とSQLを確認する。結果が空なら、その時点では該当する待ちがない。
 
-Mac側で作業ディレクトリを作り、サーバーから`webapp`を取得する。
+### 3.4. 必要な場合だけインデックスを追加する
+
+注意：次はDBを変更する例。対象DB・既存インデックス・実行計画を確認してから実行する。
+インデックス作成中は負荷や待ちが発生することもある。適用前に戻し方も確認する。
+
+```sql
+ALTER TABLE comments
+ADD INDEX post_id_idx (post_id, created_at DESC);
+```
+
+追加後に同じSQLの`EXPLAIN`とベンチマークを再実行し、変更前と比較する。
+
+## 4. private-isuの変更を反映する
+
+必要な変更だけ選ぶ。反映後は「2. private-isuを計測する」で効果を確認する。
+
+### 4.1. Rubyの実行先を確認する
+
+実行場所：サーバー。
 
 ```bash
-mkdir -p ~/work/private-isu-local/server-config/system
-
-rsync -avz \
-  isucon-01:/home/isucon/private_isu.git/webapp \
-  ~/work/private-isu-local/
+sudo systemctl show isu-ruby.service -p WorkingDirectory -p ExecStart
 ```
 
-NginxとMySQLの設定をコピーする。
+確認：以降の転送先が、表示されたアプリの配置先と一致すること。
+
+### 4.2. アプリを編集して転送する
+
+VS Codeを使う場合は、Remote - SSH拡張で`isucon-01`へ接続する。
+サーバーの`/home/isucon/private_isu.git/webapp`を開けば、直接編集できる。
+
+ローカルで編集する場合は、Macでアプリを取得する。
 
 ```bash
-rsync -avzL \
-  isucon-01:/etc/nginx \
-  isucon-01:/etc/mysql \
-  ~/work/private-isu-local/server-config/
+mkdir -p ~/work/private-isu-local
+rsync -avz isucon-01:/home/isucon/private_isu.git/webapp ~/work/private-isu-local/
 ```
 
-systemdの設定をコピーする。
-
-```bash
-rsync -avzL \
-  isucon-01:/etc/systemd/system/isu-ruby.service \
-  isucon-01:/etc/systemd/system/multi-user.target.wants/nginx.service \
-  isucon-01:/etc/systemd/system/multi-user.target.wants/mysql.service \
-  isucon-01:/etc/systemd/system/multi-user.target.wants/memcached.service \
-  ~/work/private-isu-local/server-config/system/
-```
-
-```bash
-codex
-```
-
-### Rubyの配置先を確認してファイルを反映する
-
-実行中のRubyの配置先を確認する。
-
-```bash
-sudo systemctl show isu-ruby -p WorkingDirectory -p ExecStart
-```
-
-サーバー上で、変更前の`app.rb`を退避する。
+編集前にサーバーで元のファイルを退避する。
 
 ```bash
 cp -p /home/isucon/private_isu.git/webapp/ruby/app.rb \
   "/home/isucon/app.rb.before-$(date +%Y%m%d-%H%M%S)"
 ```
 
-Mac側から確認したファイルをサーバーへ転送する。
+ローカルで編集した場合は、Macから転送する。
 
 ```bash
-rsync -avz \
-  ~/work/private-isu-local/webapp/ruby/app.rb \
+rsync -avz ~/work/private-isu-local/webapp/ruby/app.rb \
   isucon-01:/home/isucon/private_isu.git/webapp/ruby/app.rb
 ```
 
-Rubyサービスの設定を変更した場合は、再起動して反映する。
+サーバーで再起動し、状態とHTTP応答を確認する。
 
 ```bash
-sudo systemctl restart isu-ruby.service
+sudo systemctl restart isu-ruby.service &&
+  sudo systemctl status isu-ruby.service --no-pager
+curl -I http://localhost/
 ```
 
-### Nginxから静的ファイルを配信する
+### 4.3. Unicornのプロセス数を変更する場合
 
-競技用サーバーで`sites-enabled`を確認し、`sites-available/isucon.conf`を編集する。
+実行場所：サーバー。
+
+```bash
+sudo find / -name unicorn_config.rb 2>/dev/null
+```
+
+実際に読み込まれる設定ファイルを確認し、退避してからプロセス数を変更する。
+反映と確認は、前節のRubyサービスの再起動手順を使う。
+
+### 4.4. Nginxから静的ファイル・画像を配信する場合
+
+実行場所：サーバー。公開ディレクトリとアプリの待受先を確認してから設定する。
+次の例は公開ディレクトリが`/home/isucon/private_isu.git/webapp/public`、待受先が8080番の場合。
 
 ```bash
 ls -la /etc/nginx/sites-enabled/
+ls -ld /home/isucon/private_isu.git/webapp/public
+sudo cp -p /etc/nginx/sites-available/isucon.conf \
+  "/etc/nginx/sites-available/isucon.conf.before-$(date +%Y%m%d-%H%M%S)"
 sudo vim /etc/nginx/sites-available/isucon.conf
 ```
 
+対象の`server`内に設定する。同じ`location`がある場合は既存の定義を変更する。
+認証が必要なファイルは、静的配信の対象に含めない。
+
 ```nginx
 location ~ ^/(favicon\.ico|css/|js/|img/) {
-  root /home/isucon/private_isu/webapp/public/;
+  root /home/isucon/private_isu.git/webapp/public/;
   expires 1d;
 }
-```
 
-### 投稿画像のNginx設定
-
-```nginx
 location /image/ {
-  root /home/isucon/private_isu/webapp/public/;
+  root /home/isucon/private_isu.git/webapp/public/;
   expires 1d;
   try_files $uri @app;
 }
@@ -427,23 +353,83 @@ location @app {
 }
 ```
 
-設定を検査し、問題がなければ反映する。
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+確認：静的ファイルと画像を取得でき、存在しない画像のリクエストがアプリへ渡ること。
+
+## 5. 任意の作業環境を用意する
+
+計測には不要。必要な場合だけ行う。
+
+### 5.1. Bashの補完と履歴検索
+
+実行場所：サーバー。Bash 4以上で、普段使うユーザーとして実行する。
+[dotfilesのBash設定](https://github.com/sorafujitani/dotfiles/tree/main/dot_config/bash)を取得する。
+外部のセットアップスクリプトなので、内容を確認してから実行する。
 
 ```bash
-sudo nginx -t
-sudo systemctl reload nginx
+(
+  set -eu
+  config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/bash"
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  base_url=https://raw.githubusercontent.com/sorafujitani/dotfiles/main/dot_config/bash
+  mkdir -p "$config_dir"
+  for file in interactive.bash setup.sh; do
+    curl -fL --retry 2 "$base_url/$file" -o "$work/$file"
+    if [ -e "$config_dir/$file" ]; then
+      cp -p "$config_dir/$file" "$config_dir/$file.before-$(date +%Y%m%d-%H%M%S).$$"
+    fi
+    cp "$work/$file" "$config_dir/$file"
+  done
+)
+less "${XDG_CONFIG_HOME:-$HOME/.config}/bash/interactive.bash" \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/bash/setup.sh"
 ```
+
+内容を確認後、実行してBashを開き直す。
+
+```bash
+bash "${XDG_CONFIG_HOME:-$HOME/.config}/bash/setup.sh" && exec bash -l
+```
+
+このセットアップは`alp`と`pt-query-digest`も導入するため、両方が使えれば手動導入は不要。
+`alp`が`~/.local/bin`にだけある場合は、`sudo alp`でも使える場所へ配置する。
+
+```bash
+sudo install -m 755 "$HOME/.local/bin/alp" /usr/local/bin/alp
+```
+
+### 5.2. サーバー設定をMacへ保存する
+
+実行場所：ローカル。SSHユーザーが読み取れる設定だけを取得する。
+
+```bash
+mkdir -p ~/work/private-isu-local/server-config/system
+rsync -avzL isucon-01:/etc/nginx isucon-01:/etc/mysql \
+  ~/work/private-isu-local/server-config/
+rsync -avzL \
+  isucon-01:/etc/systemd/system/isu-ruby.service \
+  isucon-01:/etc/systemd/system/multi-user.target.wants/nginx.service \
+  isucon-01:/etc/systemd/system/multi-user.target.wants/mysql.service \
+  isucon-01:/etc/systemd/system/multi-user.target.wants/memcached.service \
+  ~/work/private-isu-local/server-config/system/
+```
+
+取得先に認証情報が含まれる場合は、公開リポジトリへ追加しない。
 
 ## pproteinでCPU・HTTP・SQLをまとめて計測する
 
-同じベンチマーク中のCPU・HTTP・SQLをまとめて確認する。
-[参照元](https://scrapbox.io/sorafujitani/pprotein_integ)のGoアプリ環境向けで、private-isuのRuby環境とは異なる。
-導入済みなら「手元のPCから画面を開く」から始める。
+pproteinはGoのCPUプロファイル（pprof）、HTTPログ、SQLスロークエリログをまとめて収集する。
+[参照元](https://scrapbox.io/sorafujitani/pprotein_integ)のGoアプリ環境向け。
+private-isuのRuby環境とは別の手順。導入済みなら「手元のPCから画面を開く」へ進む。
 
 ### 初回の導入
 
-Ubuntu/Debianのサーバー上で、`isucon`ユーザーとして実行する。
-`alp`・`slp`は導入済みとし、次の設定を用意しておく。
+実行場所：Ubuntu/Debianのサーバー。`isucon`ユーザーで作業する。
+`alp`・`slp`は導入済みとし、次の設定を用意する。
 
 | 対象 | 必要な設定 |
 | --- | --- |
@@ -453,15 +439,16 @@ Ubuntu/Debianのサーバー上で、`isucon`ユーザーとして実行する�
 | MySQLの設定値 | `slow_query_log=ON`、`long_query_time=0`、`log_output=FILE` |
 | pprotein-agent | 上記ログを読み取り、補助グループ`adm`で実行 |
 
-MySQLの設定方法は、前述の「MySQLのスロークエリ設定」を参照する。
-NginxのLTSVログは、前述のJSONログとは別のファイル。
+MySQLの設定は「1.3. MySQLのスロークエリログを設定する」を参照する。
+NginxのLTSVログはprivate-isuのJSONログとは別のファイル。
 
-本体とGraphvizをインストールする。途中で失敗したら、解決するまで先へ進まない。
+本体とGraphvizをインストールする。
 
 ```bash
-sudo apt-get update && sudo apt-get install -y curl ca-certificates graphviz
 (
   set -eu
+  sudo apt-get update
+  sudo apt-get install -y curl ca-certificates graphviz
   case "$(uname -m)" in
     x86_64) arch=amd64 ;;
     aarch64|arm64) arch=arm64 ;;
@@ -477,14 +464,17 @@ sudo apt-get update && sudo apt-get install -y curl ca-certificates graphviz
 )
 ```
 
-次は参照元サーバーの保存済み設定を配置する手順。
+次の配置手順は、参照元サーバーの保存済み設定がある場合だけ使える。
 設定ファイルとサービス定義は、このリポジトリには含まれない。
-`/home/isucon/pprotein/config/`と`systemd/`へ用意してから実行する。
-サービスの`PATH`には`alp`・`slp`の配置先を含める。
-pprotein-agentの`PPROTEIN_HTTPLOG`は`/var/log/nginx/pprotein-access.log`に設定する。
+開始前に次を確認する。
 
-9000番・19000番は外部公開せず、ファイアウォールなどでlocalhostからのアクセスに限定する。
-公式バイナリは全アドレスで待ち受けるため、SSH転送だけでは公開を防げない。
+- `/home/isucon/pprotein/config/nginx-pprotein.conf`が用意されている。
+- `/home/isucon/pprotein/systemd/`に`pprotein.service`と`pprotein-agent.service`がある。
+- サービスの`PATH`に`alp`・`slp`の配置先が含まれる。
+- pprotein-agentの`PPROTEIN_HTTPLOG`が`/var/log/nginx/pprotein-access.log`に設定されている。
+- ファイアウォールなどで9000番・19000番をlocalhostからのアクセスに限定している。
+
+公式バイナリは全アドレスで待ち受ける。SSH転送だけでは外部公開を防げない。
 
 ```bash
 (
@@ -502,15 +492,17 @@ pprotein-agentの`PPROTEIN_HTTPLOG`は`/var/log/nginx/pprotein-access.log`に設
 Goアプリにpprofを追加した場合は、ビルドして再起動する。
 
 ```bash
-cd /home/isucon/webapp/go
-go build -buildvcs=false -o isuconquest.new . &&
+cd /home/isucon/webapp/go &&
+  go build -buildvcs=false -o isuconquest.new . &&
   mv isuconquest.new isuconquest &&
   sudo systemctl restart isuconquest.go
 ```
 
+確認：サービスが稼働し、後述の5秒計測でCPU・HTTP・SQLのレポートを開けること。
+
 ### 手元のPCから画面を開く
 
-手元のPCで実行する。`isucon-01`は普段使うSSHの接続先へ置き換える。
+実行場所：ローカル。`isucon-01`は普段使うSSH接続先へ置き換える。
 専用のSSH設定ファイルを使う場合は、`-F /path/to/config`も指定する。
 
 ```bash
@@ -521,7 +513,8 @@ ssh -N -L 9000:127.0.0.1:9000 -o ExitOnForwardFailure=yes isucon-01
 
 ### ベンチマークと同時に計測する
 
-初回は画面のtargets設定で、次の計測先と`Duration=60`を設定する。
+実行場所：pproteinの画面と、練習環境のベンチマーク実行端末。
+初回は画面のtargets設定を次の内容にする。
 
 | Type | Label | URL |
 | --- | --- | --- |
@@ -529,21 +522,33 @@ ssh -N -L 9000:127.0.0.1:9000 -o ExitOnForwardFailure=yes isucon-01
 | httplog | nginx | `http://127.0.0.1:19000/debug/log/httplog` |
 | slowlog | mysql | `http://127.0.0.1:19000/debug/log/slowlog` |
 
-1. グループ計測の`Collect`を押す。
-2. すぐにベンチマークを実行する。
-3. 60秒後、CPU・HTTP・SQLの結果を開く。
+1. 動作確認は全targetsを`Duration=5`にする。本計測は`Duration=60`にする。
+2. グループ計測の`Collect`を押す。
+3. すぐにベンチマークを実行する。
+4. 設定した秒数の後、同じグループのCPU・HTTP・SQLのレポートを開く。
 
-初回の動作確認だけは`Duration=5`で行い、3種類のレポートが開けたら60へ戻す。
-ログは計測中に追記された部分が対象。
-設定と計測結果は`/home/isucon/pprotein/data/`に保存される。
-
-### 困ったとき
-
-サーバー上でサービスの状態とログを確認する。
-
-```bash
-sudo systemctl status pprotein pprotein-agent isuconquest.go
-sudo journalctl -u pprotein -u pprotein-agent -n 50 --no-pager
-```
+確認：3種類のレポートを開けること。動作確認後は`Duration=60`へ戻す。
+CPUは関数、HTTPはAPI、SQLはクエリごとの時間を確認する。
+ログは計測中に追記された部分が対象。設定と結果は`/home/isucon/pprotein/data/`に保存される。
 
 公式: <https://github.com/kaz/pprotein>
+
+## 失敗したとき
+
+実行場所：サーバー。該当するサービスだけを確認する。
+
+```bash
+sudo nginx -t
+sudo systemctl status nginx mysql isu-ruby.service --no-pager
+sudo journalctl -u nginx -u mysql -u isu-ruby.service -n 50 --no-pager
+```
+
+pprotein環境の場合：
+
+```bash
+sudo systemctl status pprotein pprotein-agent isuconquest.go --no-pager
+sudo journalctl -u pprotein -u pprotein-agent -u isuconquest.go -n 50 --no-pager
+```
+
+アプリや設定ファイルの変更後に異常が出たら、退避版へ戻し、該当する検査と再起動を行う。
+解決できなければ作業を止め、実行コマンド・エラー・変更箇所をチームへ共有する。
