@@ -5,3 +5,4 @@ dist/
 *.log
 .env
 .DS_Store
+/docs/work-log/isucon-command-collection-20260926.md
