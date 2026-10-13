@@ -436,45 +436,30 @@ sudo systemctl reload nginx
 
 ## pproteinでCPU・HTTP・SQLをまとめて計測する
 
-pproteinを使うと、同じベンチマーク中のCPU使用状況、HTTPアクセスログ、SQLの実行時間をまとめて確認できる。
-以下は[pprotein導入・確認手順](https://scrapbox.io/sorafujitani/pprotein_integ)のGoアプリ環境を対象とする。
-未導入環境向けの設定例は、[公式v1.2.4](https://github.com/kaz/pprotein/tree/v1.2.4)の実装に基づいて補足した。
-この記事のprivate-isuのRuby環境とは、アプリの配置先・サービス名・ログ形式が異なる。
+同じベンチマーク中のCPU・HTTP・SQLをまとめて確認する。
+[参照元](https://scrapbox.io/sorafujitani/pprotein_integ)のGoアプリ環境向けで、private-isuのRuby環境とは異なる。
+導入済みなら「手元のPCから画面を開く」から始める。
 
-### 導入済み環境の構成
+### 初回の導入
 
-| 対象 | 配置・設定 |
+Ubuntu/Debianのサーバー上で、`isucon`ユーザーとして実行する。
+`alp`・`slp`は導入済みとし、次の設定を用意しておく。
+
+| 対象 | 必要な設定 |
 | --- | --- |
-| pprotein v1.2.4 | `/home/isucon/bin/pprotein`。画面は9000番 |
-| pprotein-agent | `/home/isucon/bin/pprotein-agent`。ログ取得は19000番で、localhost限定 |
-| Goアプリ | `webapp/go/profiling.go`で`127.0.0.1:6060`にpprofを追加し、`main.go`から起動 |
-| Nginx | LTSV形式のアクセスログを出力 |
-| MySQL | スロークエリログを有効にし、`long_query_time=0` |
-| 集計ツール | 既存の`~/.local/bin/alp`、`~/.local/bin/slp`とGraphvizを使用 |
+| Goアプリ | pprofを`127.0.0.1:6060`で起動 |
+| Nginx | `/var/log/nginx/pprotein-access.log`にLTSV形式で出力 |
+| MySQL | `/var/log/mysql/mysql-slow.log`に出力 |
+| MySQLの設定値 | `slow_query_log=ON`、`long_query_time=0`、`log_output=FILE` |
+| pprotein-agent | 上記ログを読み取り、補助グループ`adm`で実行 |
 
-設定の控えは`/home/isucon/pprotein/config/`、サービス定義は`/home/isucon/pprotein/systemd/`にある。
-実際に使う設定と計測結果は`/home/isucon/pprotein/data/`に保存され、pprotein-agentは補助グループ`adm`でログを読み取る。
-Nginxの設定は`/etc/nginx/conf.d/pprotein.conf`に置き、ログは`/var/log/nginx/pprotein-access.log`へ出力する。
-MySQLのログ出力先は`/var/log/mysql/mysql-slow.log`。
-この節のNginxログはLTSV形式で、前述の`alp json`に渡すJSONログとは別のファイル。
+MySQLの設定方法は、前述の「MySQLのスロークエリ設定」を参照する。
+NginxのLTSVログは、前述のJSONログとは別のファイル。
 
-### 未導入環境にセットアップする
-
-Ubuntu/Debian、systemd、`isucon`ユーザーでの作業を前提とする。
-Goアプリ、Nginx、MySQLは導入済みとし、設定変更前に既存ファイルを退避する。
-以下は新規導入用の例で、参照元サーバーに保存された設定ファイルそのものではない。
-導入済みの場合は実行せず、「手元のPCから画面を開く」へ進む。
-
-#### 本体と集計ツールを配置する
-
-サーバー上で実行する。Linuxのamd64とarm64に対応する。
-途中で失敗した場合は、解決するまで次の手順へ進まない。
+本体とGraphvizをインストールする。途中で失敗したら、解決するまで先へ進まない。
 
 ```bash
 sudo apt-get update && sudo apt-get install -y curl ca-certificates graphviz
-mkdir -p /home/isucon/bin /home/isucon/.local/bin \
-  /home/isucon/pprotein/{config,systemd,data}
-
 (
   set -eu
   case "$(uname -m)" in
@@ -484,224 +469,22 @@ mkdir -p /home/isucon/bin /home/isucon/.local/bin \
   esac
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
-  cd "$work"
-  curl -fL -o pprotein.tar.gz \
+  curl -fL -o "$work/pprotein.tar.gz" \
     "https://github.com/kaz/pprotein/releases/download/v1.2.4/pprotein_1.2.4_linux_${arch}.tar.gz"
-  tar -xzf pprotein.tar.gz
-  install -m 755 pprotein pprotein-agent /home/isucon/bin/
-
-  # 既存のalp・slpは上書きしない。
-  if ! command -v alp >/dev/null && ! test -x /home/isucon/.local/bin/alp; then
-    curl -fL -o alp.tar.gz \
-      "https://github.com/tkuchiki/alp/releases/download/v1.0.21/alp_linux_${arch}.tar.gz"
-    tar -xzf alp.tar.gz
-    install -m 755 alp /home/isucon/.local/bin/
-  fi
-  if ! command -v slp >/dev/null && ! test -x /home/isucon/.local/bin/slp; then
-    curl -fL -o slp.tar.gz \
-      "https://github.com/tkuchiki/slp/releases/download/v0.2.3/slp_linux_${arch}.tar.gz"
-    tar -xzf slp.tar.gz
-    install -m 755 slp /home/isucon/.local/bin/
-  fi
+  tar -xzf "$work/pprotein.tar.gz" -C "$work"
+  mkdir -p /home/isucon/bin
+  install -m 755 "$work/pprotein" "$work/pprotein-agent" /home/isucon/bin/
 )
-
-PATH="/home/isucon/.local/bin:$PATH" alp --version
-PATH="/home/isucon/.local/bin:$PATH" slp --version
-dot -V
 ```
 
-#### Goアプリにpprofを追加する
+次は参照元サーバーの保存済み設定を配置する手順。
+設定ファイルとサービス定義は、このリポジトリには含まれない。
+`/home/isucon/pprotein/config/`と`systemd/`へ用意してから実行する。
+サービスの`PATH`には`alp`・`slp`の配置先を含める。
+pprotein-agentの`PPROTEIN_HTTPLOG`は`/var/log/nginx/pprotein-access.log`に設定する。
 
-pprofはGoのCPU使用状況などを取得するHTTPエンドポイント。
-`/home/isucon/webapp/go/profiling.go`に次のコードを追加し、`main.go`の`main()`から`startProfiling()`を呼ぶ。
-既にpprofを起動している場合は追加せず、その待受先を利用する。
-
-```go
-package main
-
-import (
-    "log"
-    "net/http"
-    _ "net/http/pprof"
-)
-
-func startProfiling() {
-    go func() {
-        log.Print(http.ListenAndServe("127.0.0.1:6060", nil))
-    }()
-}
-```
-
-後述の「導入時の設定配置とGoアプリの反映」でビルド・再起動する。
-
-#### NginxとMySQLのログを用意する
-
-`/home/isucon/pprotein/config/nginx-pprotein.conf`にログ形式の定義を保存する。
-Ubuntu/Debian標準の構成では、`conf.d/*.conf`は`http`コンテキストから読み込まれる。
-異なる構成では、`log_format`を`http`内に配置する。
-
-```nginx
-log_format pprotein_ltsv 'time:$time_iso8601\tmethod:$request_method\turi:$request_uri\tstatus:$status\tsize:$body_bytes_sent\treqtime:$request_time';
-```
-
-計測対象の`server`ブロックに次の行を追加する。
-既存のJSONログも残す場合は、その`access_log`行と同じブロックへ追加する。
-ログ形式の定義だけでは、アクセスログは出力されない。
-
-```nginx
-access_log /var/log/nginx/pprotein-access.log pprotein_ltsv;
-```
-
-MySQLは前述の「MySQLのスロークエリ設定」に従い、ファイルへの出力を有効にする。
-`log_output=FILE`、`slow_query_log=ON`、`long_query_time=0`を確認する。
-`long_query_time=0`はログ量が増えるため、空き容量も確認する。
-ログ作成後、エージェントの実行ユーザーが読み取れるようにする。
-
-```bash
-sudo touch /var/log/nginx/pprotein-access.log /var/log/mysql/mysql-slow.log
-sudo chown www-data:adm /var/log/nginx/pprotein-access.log
-sudo chown mysql:adm /var/log/mysql/mysql-slow.log
-sudo chmod 640 /var/log/nginx/pprotein-access.log /var/log/mysql/mysql-slow.log
-sudo -u isucon -g adm test -r /var/log/nginx/pprotein-access.log
-sudo -u isucon -g adm test -r /var/log/mysql/mysql-slow.log
-```
-
-Nginxの実行ユーザーが`www-data`でない環境では、所有者を置き換える。
-ログローテーション後も所有者と権限を維持する。
-
-#### systemdサービスを用意する
-
-次を`/home/isucon/pprotein/systemd/pprotein.service`に保存する。
-`PATH`には集計ツールの配置先を含める。
-既存の`alp`・`slp`が別のディレクトリにある場合は、そのパスも追加する。
-
-```ini
-[Unit]
-Description=pprotein
-After=network.target
-
-[Service]
-User=isucon
-WorkingDirectory=/home/isucon/pprotein
-Environment="PATH=/home/isucon/.local/bin:/usr/local/bin:/usr/bin:/bin"
-Environment=PORT=9000
-ExecStart=/home/isucon/bin/pprotein
-Restart=on-failure
-IPAddressDeny=any
-IPAddressAllow=localhost
-
-[Install]
-WantedBy=multi-user.target
-```
-
-次を`/home/isucon/pprotein/systemd/pprotein-agent.service`に保存する。
-
-```ini
-[Unit]
-Description=pprotein-agent
-After=network.target
-
-[Service]
-User=isucon
-SupplementaryGroups=adm
-WorkingDirectory=/home/isucon/webapp/go
-Environment=PORT=19000
-Environment=PPROTEIN_HTTPLOG=/var/log/nginx/pprotein-access.log
-Environment=PPROTEIN_SLOWLOG=/var/log/mysql/mysql-slow.log
-Environment=PPROTEIN_GIT_REPOSITORY=/home/isucon/webapp
-ExecStart=/home/isucon/bin/pprotein-agent
-Restart=on-failure
-IPAddressDeny=any
-IPAddressAllow=localhost
-
-[Install]
-WantedBy=multi-user.target
-```
-
-`PPROTEIN_GIT_REPOSITORY`はアプリのGitリポジトリのパスへ置き換える。
-公式バイナリは9000番・19000番を全アドレスで待ち受けるため、上記ではsystemdでlocalhost以外の通信を拒否する。
-この制限にはカーネルのcgroup BPF対応が必要で、非対応環境では効かない。
-起動前に、ファイアウォールでも両ポートへの外部アクセスを遮断する。
-SSH転送だけでは、サーバー側の公開ポートを制限できない。
-
-後述の「導入時の設定配置とGoアプリの反映」で配置・起動する。
-`nginx -t`、アプリのビルド、サービス起動のいずれかが失敗した場合は、計測へ進まずログを確認する。
-
-#### 計測先を設定する
-
-「手元のPCから画面を開く」に従い、画面のグループ計測のtargets設定を次の内容に変更する。
-初期値の9000番はpprotein自身を計測するため、アプリの6060番とエージェントの19000番へ変更する。
-
-```json
-[
-  {
-    "Type": "pprof",
-    "Label": "isuconquest-cpu",
-    "URL": "http://127.0.0.1:6060/debug/pprof/profile",
-    "Duration": 60
-  },
-  {
-    "Type": "httplog",
-    "Label": "nginx",
-    "URL": "http://127.0.0.1:19000/debug/log/httplog",
-    "Duration": 60
-  },
-  {
-    "Type": "slowlog",
-    "Label": "mysql",
-    "URL": "http://127.0.0.1:19000/debug/log/slowlog",
-    "Duration": 60
-  }
-]
-```
-
-まず`Duration`をすべて5に変更してCollectを押し、ベンチマークなどでアプリに負荷をかける。
-CPU・HTTP・SQLの収集を確認する。
-3種類の結果とレポートを開けたら、すべて60へ戻してベンチマークと同時に計測する。
-URLのまとめ方は、画面のhttplog設定にある`matching_groups`をアプリのパスに合わせて変更する。
-
-### 手元のPCから画面を開く
-
-導入済みの場合はここから始める。手元のPCのターミナルで、SSH接続を通じてサーバーの9000番を転送する。
-次の`-F`には、参照元の環境で使うSSH設定ファイルを指定している。別の環境では、普段使うSSH設定ファイルと接続先に置き換える。
-
-```bash
-ssh -F ~/.ssh/prox-isu-portal/79904627-26ab-4ff9-a5e8-d9ec3f189dce/config \
-  -N -L 9000:127.0.0.1:9000 \
-  -o ExitOnForwardFailure=yes isucon-01
-```
-
-何も表示されず待機していれば、ブラウザで`http://localhost:9000/`を開く。
-VS Codeは不要。接続を終了するときは、このターミナルで`Ctrl+C`を押す。
-
-### ベンチマークと同時に計測する
-
-1. 画面のグループ計測の`Collect`を押す。
-2. すぐにベンチマークを実行する。
-3. 60秒後、同じグループの結果を開く。
-
-| 結果 | 確認すること |
-| --- | --- |
-| `isuconquest-cpu` / pprof | CPUを使っているGoの関数 |
-| `nginx` / httplog | 時間がかかるAPI。ユーザーIDなどが異なるURLはまとめて集計 |
-| `mysql` / slowlog | 時間がかかるSQL |
-
-計測時間は画面のtargets設定の`Duration`で変更する。ログは計測中に追記された部分が対象。
-
-### 状態とログを確認する
-
-画面を開けない、または結果が出ない場合は、サーバー上でサービスの状態とログを確認する。
-
-```bash
-sudo systemctl status pprotein pprotein-agent isuconquest.go
-sudo journalctl -u pprotein -u pprotein-agent -n 50 --no-pager
-```
-
-### 導入時の設定配置とGoアプリの反映
-
-以下は参照元の環境で実施済みの設定配置手順。
-新規導入の場合は、前述の手順で本体・設定ファイル・サービス定義を用意してから実行する。
-サーバー上で実行する。
+9000番・19000番は外部公開せず、ファイアウォールなどでlocalhostからのアクセスに限定する。
+公式バイナリは全アドレスで待ち受けるため、SSH転送だけでは公開を防げない。
 
 ```bash
 (
@@ -716,7 +499,7 @@ sudo journalctl -u pprotein -u pprotein-agent -n 50 --no-pager
 )
 ```
 
-Goアプリを変更した場合は、サーバー上で実行ファイルを作り直し、サービスを再起動する。
+Goアプリにpprofを追加した場合は、ビルドして再起動する。
 
 ```bash
 cd /home/isucon/webapp/go
@@ -725,5 +508,42 @@ go build -buildvcs=false -o isuconquest.new . &&
   sudo systemctl restart isuconquest.go
 ```
 
-参照元では、導入時の5秒間の動作確認でCPU・HTTP・SQLの収集とレポート生成が成功したと記録されている。
-公式リポジトリ：[kaz/pprotein](https://github.com/kaz/pprotein)。
+### 手元のPCから画面を開く
+
+手元のPCで実行する。`isucon-01`は普段使うSSHの接続先へ置き換える。
+専用のSSH設定ファイルを使う場合は、`-F /path/to/config`も指定する。
+
+```bash
+ssh -N -L 9000:127.0.0.1:9000 -o ExitOnForwardFailure=yes isucon-01
+```
+
+接続したままブラウザで <http://localhost:9000/> を開く。終了はCtrl+C。
+
+### ベンチマークと同時に計測する
+
+初回は画面のtargets設定で、次の計測先と`Duration=60`を設定する。
+
+| Type | Label | URL |
+| --- | --- | --- |
+| pprof | isuconquest-cpu | `http://127.0.0.1:6060/debug/pprof/profile` |
+| httplog | nginx | `http://127.0.0.1:19000/debug/log/httplog` |
+| slowlog | mysql | `http://127.0.0.1:19000/debug/log/slowlog` |
+
+1. グループ計測の`Collect`を押す。
+2. すぐにベンチマークを実行する。
+3. 60秒後、CPU・HTTP・SQLの結果を開く。
+
+初回の動作確認だけは`Duration=5`で行い、3種類のレポートが開けたら60へ戻す。
+ログは計測中に追記された部分が対象。
+設定と計測結果は`/home/isucon/pprotein/data/`に保存される。
+
+### 困ったとき
+
+サーバー上でサービスの状態とログを確認する。
+
+```bash
+sudo systemctl status pprotein pprotein-agent isuconquest.go
+sudo journalctl -u pprotein -u pprotein-agent -n 50 --no-pager
+```
+
+公式: <https://github.com/kaz/pprotein>
