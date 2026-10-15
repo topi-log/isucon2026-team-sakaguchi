@@ -96,6 +96,11 @@ task vm:bench    # VMへ負荷試験
 
 VMは各Macのnative architectureで動きます。Intel MacとApple Siliconでは実行条件が異なるため、VM間のscoreは直接比較できません。
 
+## Go環境の練習手順
+
+[Go環境向けのISUCON練習コマンド集](plans/isucon-go-command-collection.md)に、pproteinの導入・計測、SQL調査、コード反映、Nginx静的配信の手順をまとめています。
+Go・MySQLを使う別の練習サーバーが対象です。このリポジトリのNode.js・PostgreSQL環境とは設定が異なります。
+
 ## ローカル開発
 
 package manager は pnpm に固定しています。Vite+ の各機能も pnpm script から実行します。
